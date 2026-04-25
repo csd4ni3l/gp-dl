@@ -1,6 +1,6 @@
 [project]
 name = "gp-dl"
-version = "0.3.0"
+version = "0.4.0"
 description = "A Python-based Google Photos downloader built with Selenium."
 readme = "README.md"
 requires-python = ">=3.11"
