@@ -1,6 +1,6 @@
 import json
-import mimetypes
 import logging
+import mimetypes
 import os
 import re
 import shutil
@@ -39,7 +39,6 @@ from .parsing import (
     _extract_media_filenames,
     _normalize_filename,
 )
-
 
 MOTION_PHOTO_DIRECT_SAVE_ONLY = False
 
@@ -123,7 +122,12 @@ def _snapshot_completed_files(
 
     try:
         for child in temp_dir_path.iterdir():
-            if not child.is_file() or child.suffix.casefold() in {".crdownload", ".tmp"}:
+            if not child.is_file() or child.suffix.casefold() in {
+                ".crdownload",
+                ".tmp",
+                ".html",
+                ".htm",
+            }:
                 continue
             stat = child.stat()
             snapshot[child.name] = (int(stat.st_size), int(stat.st_mtime_ns))
@@ -147,7 +151,12 @@ def _find_completed_download_with_overwrite_detection(
 
     try:
         for child in temp_dir_path.iterdir():
-            if not child.is_file() or child.suffix.casefold() in {".crdownload", ".tmp"}:
+            if not child.is_file() or child.suffix.casefold() in {
+                ".crdownload",
+                ".tmp",
+                ".html",
+                ".htm",
+            }:
                 continue
             if child.name not in excluded_names:
                 return child.name
@@ -168,44 +177,57 @@ def _download_motion_photo_still(
     google_id: str,
     item_url: str | None = None,
     timeout: float | None = None,
+    image_url: str | None = None,
+    referer_url: str | None = None,
 ) -> str | None:
     original_rect = None
     try:
-        try:
-            if item_url and item_url != driver.current_url:
-                driver.get(item_url)
-        except Exception:
-            pass
-
-        time.sleep(0.5)
-
-        try:
-            original_rect = driver.get_window_rect()
-        except Exception:
-            original_rect = None
-
-        try:
-            driver.set_window_rect(width=3000, height=3000)
-        except Exception:
-            try:
-                driver.set_window_size(3000, 3000)
-            except Exception as e:
-                logging.debug(
-                    f"Could not resize browser window for motion photo fallback {google_id}: {e}"
-                )
-
-        time.sleep(0.5)
-
-        image_url = _photo_image_download_url(
-            driver, timeout=timeout if timeout is not None else 3.0
-        )
         if not image_url:
-            logging.error(
-                f"Could not determine motion photo image URL for Google Photos item {google_id}."
-            )
-            return None
+            try:
+                # Force a navigation even when Chrome reports the same URL. A failed
+                # motion-photo Shift+D can leave Google Photos on an error screen at
+                # the item URL while the DOM still contains the previous photo's
+                # image element.
+                if item_url:
+                    driver.get(item_url)
+            except Exception:
+                pass
 
-        headers = {"Referer": driver.current_url}
+            time.sleep(0.5)
+
+            try:
+                original_rect = driver.get_window_rect()
+            except Exception:
+                original_rect = None
+
+            try:
+                driver.set_window_rect(width=3000, height=3000)
+            except Exception:
+                try:
+                    driver.set_window_size(3000, 3000)
+                except Exception as e:
+                    logging.debug(
+                        f"Could not resize browser window for motion photo fallback {google_id}: {e}"
+                    )
+
+            time.sleep(0.5)
+
+            image_url = _photo_image_download_url(
+                driver, timeout=timeout if timeout is not None else 3.0
+            )
+            if not image_url:
+                logging.error(
+                    f"Could not determine motion photo image URL for Google Photos item {google_id}."
+                )
+                return None
+
+        if referer_url is None:
+            try:
+                referer_url = driver.current_url
+            except Exception:
+                referer_url = item_url
+
+        headers = {"Referer": referer_url or item_url or "https://photos.google.com/"}
         try:
             user_agent = driver.execute_script("return navigator.userAgent")
             if user_agent:
@@ -235,13 +257,17 @@ def _download_motion_photo_still(
 
             if not filename:
                 content_type = response.headers.get_content_type()
-                guessed_extension = mimetypes.guess_extension(content_type or "") or ".jpg"
+                guessed_extension = (
+                    mimetypes.guess_extension(content_type or "") or ".jpg"
+                )
                 filename = f"{google_id}{guessed_extension}"
             else:
                 filename = os.path.basename(unquote(filename.strip().strip('"')))
                 if not Path(filename).suffix:
                     content_type = response.headers.get_content_type()
-                    guessed_extension = mimetypes.guess_extension(content_type or "") or ".jpg"
+                    guessed_extension = (
+                        mimetypes.guess_extension(content_type or "") or ".jpg"
+                    )
                     filename = f"{filename}{guessed_extension}"
 
             temp_dir_path.mkdir(parents=True, exist_ok=True)
@@ -249,7 +275,9 @@ def _download_motion_photo_still(
             with save_path.open("wb") as output_file:
                 shutil.copyfileobj(response, output_file)
 
-            logging.info(f"Saved motion photo still directly from page as {save_path.name}")
+            logging.info(
+                f"Saved motion photo still directly from page as {save_path.name}"
+            )
             return save_path.name
     except (HTTPError, URLError, OSError) as e:
         logging.error(
@@ -796,7 +824,9 @@ def _download_individual_album_items(
         try:
             global MOTION_PHOTO_DIRECT_SAVE_ONLY
 
-            files_by_google_id, _ = _local_album_google_id_files(output_path, album_title)
+            files_by_google_id, _ = _local_album_google_id_files(
+                output_path, album_title
+            )
             existing_with_id = files_by_google_id.get(google_id.casefold(), [])
             if existing_with_id:
                 logging.info(
@@ -858,8 +888,11 @@ def _download_individual_album_items(
             driver.get(item["url"])
             _prepare_download_focus(driver, google_id)
 
+            downloaded_file = None
+            motion_photo_still_url = None
             motion_photo_page = _is_motion_photo_page(driver, timeout=0.5)
             if motion_photo_page:
+                motion_photo_still_url = _photo_image_download_url(driver, timeout=3.0)
                 if MOTION_PHOTO_DIRECT_SAVE_ONLY:
                     logging.info(
                         f"Motion photo controls detected for Google Photos item {google_id}; using direct save fallback for this session."
@@ -870,18 +903,21 @@ def _download_individual_album_items(
                         google_id,
                         item_url=item["url"],
                         timeout=3.0,
+                        image_url=motion_photo_still_url,
+                        referer_url=item["url"],
                     )
                     if not downloaded_file:
                         failed_count += 1
                         continue
-                    motion_photo_page = False
                 else:
                     logging.info(
                         f"Motion photo controls detected for Google Photos item {google_id}."
                     )
 
             download_started = False
-            if motion_photo_page and not MOTION_PHOTO_DIRECT_SAVE_ONLY:
+            if downloaded_file:
+                pass
+            elif motion_photo_page and not MOTION_PHOTO_DIRECT_SAVE_ONLY:
                 triggered = _start_download_with_keyboard_shortcut(driver)
                 broken_motion_page = _motion_photo_page_looks_broken(driver)
                 download_started = bool(
@@ -909,6 +945,8 @@ def _download_individual_album_items(
                         google_id,
                         item_url=item["url"],
                         timeout=3.0,
+                        image_url=motion_photo_still_url,
+                        referer_url=item["url"],
                     )
                     if not downloaded_file:
                         failed_count += 1
@@ -917,10 +955,12 @@ def _download_individual_album_items(
                     downloaded_file = None
                     deadline = time.perf_counter() + 4.0
                     while time.perf_counter() < deadline and not downloaded_file:
-                        downloaded_file = _find_completed_download_with_overwrite_detection(
-                            temp_dir_path,
-                            existing_download_names,
-                            existing_download_snapshot,
+                        downloaded_file = (
+                            _find_completed_download_with_overwrite_detection(
+                                temp_dir_path,
+                                existing_download_names,
+                                existing_download_snapshot,
+                            )
                         )
                         time.sleep(0.1)
 
@@ -935,6 +975,8 @@ def _download_individual_album_items(
                             google_id,
                             item_url=item["url"],
                             timeout=3.0,
+                            image_url=motion_photo_still_url,
+                            referer_url=item["url"],
                         )
                         if not downloaded_file:
                             failed_count += 1
@@ -1047,11 +1089,13 @@ def _download_individual_album_items(
             resolved_target = (target_album_dir / target_name).resolve()
 
             if not _is_path_within(resolved_target, output_path):
-                logging.error(f"Skipping downloaded file with unsafe path: {target_name}")
+                logging.error(
+                    f"Skipping downloaded file with unsafe path: {target_name}"
+                )
                 failed_count += 1
                 continue
 
-            if downloaded_path.suffix.casefold() == ".zip":
+            if downloaded_path.suffix.casefold() in {".zip", ".html", ".htm"}:
                 logging.error(
                     f"Refusing unsupported download format for Google Photos item {google_id}."
                 )
@@ -1060,7 +1104,9 @@ def _download_individual_album_items(
                 continue
 
             if _path_conflicts_case_insensitive(resolved_target):
-                conflicting_path = _find_conflicting_file_case_insensitive(resolved_target)
+                conflicting_path = _find_conflicting_file_case_insensitive(
+                    resolved_target
+                )
                 files_by_google_id, _ = _local_album_google_id_files(
                     output_path, album_title
                 )
@@ -1144,7 +1190,9 @@ def _download_individual_album_items(
                     continue
 
                 if conflicting_path is not None:
-                    owner_ids = path_to_google_ids.get(conflicting_path.resolve(), set())
+                    owner_ids = path_to_google_ids.get(
+                        conflicting_path.resolve(), set()
+                    )
                     if not owner_ids or google_id.casefold() in owner_ids:
                         _record_google_id_for_existing_path(
                             album_dirs,
@@ -1160,7 +1208,9 @@ def _download_individual_album_items(
                         _best_effort_unlink(downloaded_path, "downloaded file")
                         continue
 
-                target_name = _filename_with_google_id_suffix(downloaded_name, google_id)
+                target_name = _filename_with_google_id_suffix(
+                    downloaded_name, google_id
+                )
                 resolved_target = (target_album_dir / target_name).resolve()
                 if not _is_path_within(resolved_target, output_path):
                     logging.error(

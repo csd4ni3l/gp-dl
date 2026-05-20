@@ -175,7 +175,6 @@ cython_debug/
 
 .vscode
 
-test*.py
 .zed/
 logs/
 logs
