@@ -181,6 +181,7 @@ def _download_motion_photo_still(
     output_path: Path,
     bootstrap_from_filename: bool = False,
     trusted_existing_paths: set[Path] | None = None,
+    expected_filenames: set[str] | None = None,
 ) -> Path | None:
     download_url = _photo_image_download_url(driver)
     if not download_url:
@@ -201,6 +202,17 @@ def _download_motion_photo_still(
                     f"Could not determine Google-provided filename for direct image download of Google Photos item {google_id}; refusing to infer a filename or extension from the rendered image URL."
                 )
                 return None
+
+            if expected_filenames:
+                expected_names = {
+                    _normalized_match_filename(expected)
+                    for expected in expected_filenames
+                }
+                if _normalized_match_filename(filename) not in expected_names:
+                    logging.info(
+                        f"Rejected direct image download for Google Photos item {google_id}; response filename {filename} did not match expected album filename(s): {sorted(expected_filenames)}."
+                    )
+                    return None
 
             target_name = filename
             resolved_target = (target_album_dir / target_name).resolve()
@@ -571,26 +583,16 @@ def _download_individual_album_items(
         logging.info(f"Downloading missing Google Photos item {google_id}")
         driver.get(item["url"])
 
-        if _is_motion_photo_page(driver, timeout=min(WEB_DRIVER_WAIT, 3)):
-            if _item_looks_like_video(item):
-                logging.debug(
-                    f"Google Photos item {google_id} is a video; skipping still-image fallback so the downloaded file extension is preserved."
-                )
-            else:
-                still_path = _download_motion_photo_still(
-                    driver,
-                    google_id,
-                    target_album_dir,
-                    output_path,
-                    bootstrap_from_filename=bootstrap_from_filename,
-                    trusted_existing_paths=trusted_existing_paths,
-                )
-                if still_path:
-                    downloaded_count += 1
-                    continue
-                logging.debug(
-                    f"Direct image download did not work for Google Photos item {google_id}; falling back to Google Photos download controls."
-                )
+        item_filenames = _extract_media_filenames(
+            str(item.get("identifiers", "") or "")
+        )
+        is_motion_photo = _is_motion_photo_page(driver, timeout=min(WEB_DRIVER_WAIT, 3))
+        item_looks_like_video = _item_looks_like_video(item)
+
+        if is_motion_photo and item_looks_like_video:
+            logging.debug(
+                f"Google Photos item {google_id} is a video; direct still-image fallback is disabled so the downloaded file extension is preserved."
+            )
 
         download_started = _start_download_with_keyboard_shortcut(
             driver
@@ -607,6 +609,23 @@ def _download_individual_album_items(
             ) and _wait_for_download_start(
                 temp_dir_path, {p.name for p in existing_download_files}
             )
+            if not download_started and is_motion_photo and not item_looks_like_video:
+                logging.debug(
+                    f"Google Photos controls did not start a download for motion photo item {google_id}; trying direct image fallback."
+                )
+                still_path = _download_motion_photo_still(
+                    driver,
+                    google_id,
+                    target_album_dir,
+                    output_path,
+                    bootstrap_from_filename=bootstrap_from_filename,
+                    trusted_existing_paths=trusted_existing_paths,
+                    expected_filenames=item_filenames,
+                )
+                if still_path:
+                    downloaded_count += 1
+                    continue
+
             if not download_started:
                 logging.error(
                     f"Could not start individual download for Google Photos item {google_id}"
