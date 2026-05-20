@@ -109,6 +109,7 @@ def _find_existing_album_file_for_filename(
     album_title: str,
     filename: str,
     exclude_paths: set[Path] | None = None,
+    allowed_paths: set[Path] | None = None,
 ) -> Path | None:
     normalized = _normalized_match_filename(filename)
     files_by_name, _ = _local_album_files_by_normalized_name(output_path, album_title)
@@ -117,6 +118,8 @@ def _find_existing_album_file_for_filename(
     ):
         resolved = candidate.resolve()
         if exclude_paths and resolved in exclude_paths:
+            continue
+        if allowed_paths is not None and resolved not in allowed_paths:
             continue
         if resolved.exists() and resolved.is_file():
             return resolved
@@ -177,6 +180,7 @@ def _download_motion_photo_still(
     target_album_dir: Path,
     output_path: Path,
     bootstrap_from_filename: bool = False,
+    trusted_existing_paths: set[Path] | None = None,
 ) -> Path | None:
     download_url = _photo_image_download_url(driver)
     if not download_url:
@@ -211,7 +215,10 @@ def _download_motion_photo_still(
                     existing_target = _find_conflicting_file_case_insensitive(
                         resolved_target
                     )
-                    if existing_target is not None:
+                    if existing_target is not None and (
+                        trusted_existing_paths is None
+                        or existing_target.resolve() in trusted_existing_paths
+                    ):
                         _record_google_id_file(
                             target_album_dir, google_id, existing_target, output_path
                         )
@@ -219,10 +226,6 @@ def _download_motion_photo_still(
                             f"Matched existing motion photo still by filename for Google Photos item {google_id}: {existing_target}. Added mapping to {GOOGLE_ID_MANIFEST_FILENAME}."
                         )
                         return existing_target
-                    logging.error(
-                        f"Refusing to create ID-suffixed duplicate for motion photo item {google_id} during no-manifest bootstrap; downloaded filename would be {filename}."
-                    )
-                    return None
 
                 target_name = _filename_with_google_id_suffix(filename, google_id)
                 resolved_target = (target_album_dir / target_name).resolve()
@@ -232,9 +235,14 @@ def _download_motion_photo_still(
                     )
                     return None
                 resolved_target = _ensure_unique_path(resolved_target)
-                logging.debug(
-                    f"Filename collision for motion photo item {google_id}; saving as {resolved_target.name}"
-                )
+                if bootstrap_from_filename:
+                    logging.debug(
+                        f"No trusted pre-existing filename match found for motion photo item {google_id} during bootstrap collision; saving as {resolved_target.name}."
+                    )
+                else:
+                    logging.debug(
+                        f"Filename collision for motion photo item {google_id}; saving as {resolved_target.name}"
+                    )
 
             temp_target = resolved_target.with_suffix(f"{resolved_target.suffix}.tmp")
             with open(temp_target, "wb") as target_file:
@@ -368,6 +376,7 @@ def _ensure_album_manifest_mappings(
     album_title: str,
     album_items: list[dict[str, str]],
     cleanup_duplicates: bool = True,
+    trusted_existing_paths: set[Path] | None = None,
 ) -> None:
     album_dirs = _album_output_dirs(output_path, album_title)
     target_album_dir = next(
@@ -444,6 +453,11 @@ def _ensure_album_manifest_mappings(
                 resolved = path.resolve()
                 if resolved in assigned_paths:
                     continue
+                if (
+                    trusted_existing_paths is not None
+                    and resolved not in trusted_existing_paths
+                ):
+                    continue
                 matched_existing = resolved
                 break
             if matched_existing is not None:
@@ -472,6 +486,7 @@ def _download_individual_album_items(
     output_path: Path,
     temp_dir_path: Path,
     bootstrap_from_filename: bool = False,
+    trusted_existing_paths: set[Path] | None = None,
 ) -> tuple[int, int, int]:
     album_dirs = _album_output_dirs(output_path, album_title)
     target_album_dir = next(
@@ -526,6 +541,11 @@ def _download_individual_album_items(
                         or resolved in assigned_paths
                     ):
                         continue
+                    if (
+                        trusted_existing_paths is not None
+                        and resolved not in trusted_existing_paths
+                    ):
+                        continue
                     matched_existing = resolved
                     break
                 if matched_existing is not None:
@@ -563,6 +583,7 @@ def _download_individual_album_items(
                     target_album_dir,
                     output_path,
                     bootstrap_from_filename=bootstrap_from_filename,
+                    trusted_existing_paths=trusted_existing_paths,
                 )
                 if still_path:
                     downloaded_count += 1
@@ -617,6 +638,7 @@ def _download_individual_album_items(
                 album_title,
                 downloaded_name,
                 exclude_paths={downloaded_path.resolve()},
+                allowed_paths=trusted_existing_paths,
             )
             if matched_existing is not None:
                 _record_google_id_for_existing_path(
@@ -675,10 +697,14 @@ def _download_individual_album_items(
                     album_title,
                     downloaded_name,
                     exclude_paths={downloaded_path.resolve()},
+                    allowed_paths=trusted_existing_paths,
                 )
                 if bootstrap_match is None and conflicting_path is not None:
                     resolved_conflict = conflicting_path.resolve()
-                    if resolved_conflict != downloaded_path.resolve():
+                    if resolved_conflict != downloaded_path.resolve() and (
+                        trusted_existing_paths is None
+                        or resolved_conflict in trusted_existing_paths
+                    ):
                         bootstrap_match = resolved_conflict
 
                 if bootstrap_match is not None:
@@ -697,12 +723,37 @@ def _download_individual_album_items(
                         downloaded_path.unlink()
                     continue
 
-                logging.error(
-                    f"Refusing to create ID-suffixed duplicate for Google Photos item {google_id} during no-manifest bootstrap; downloaded file was {downloaded_name}."
+                target_name = _filename_with_google_id_suffix(
+                    downloaded_name, google_id
                 )
-                failed_count += 1
-                if downloaded_path.exists():
-                    downloaded_path.unlink()
+                resolved_target = (target_album_dir / target_name).resolve()
+                if not _is_path_within(resolved_target, output_path):
+                    logging.error(
+                        f"Skipping downloaded file with unsafe path: {target_name}"
+                    )
+                    failed_count += 1
+                    if downloaded_path.exists():
+                        downloaded_path.unlink()
+                    continue
+                resolved_target = _ensure_unique_path(resolved_target)
+                logging.debug(
+                    f"No trusted pre-existing filename match found for Google Photos item {google_id} during bootstrap collision; saving as {resolved_target.name}."
+                )
+
+                if downloaded_path.resolve() != resolved_target:
+                    _ = shutil.move(str(downloaded_path), str(resolved_target))
+
+                final_name = resolved_target.name
+                _record_google_id_file(
+                    target_album_dir, google_id, resolved_target, output_path
+                )
+                if final_name != downloaded_name:
+                    logging.info(
+                        f"Saved individual download as {final_name} (renamed from {downloaded_name})"
+                    )
+                else:
+                    logging.info(f"Saved individual download as {final_name}")
+                downloaded_count += 1
                 continue
 
             if conflicting_path is not None:
@@ -845,11 +896,24 @@ def _download_missing_album_items_by_google_id(
         (album_dir / GOOGLE_ID_MANIFEST_FILENAME).exists() for album_dir in album_dirs
     )
 
+    trusted_existing_paths: set[Path] | None = None
+    if not manifest_present_initially:
+        files_by_name_bootstrap, _ = _local_album_files_by_normalized_name(
+            output_path, album_title
+        )
+        trusted_existing_paths = {
+            path.resolve()
+            for paths in files_by_name_bootstrap.values()
+            for path in paths
+            if path.exists() and path.is_file()
+        }
+
     _ensure_album_manifest_mappings(
         output_path,
         album_title,
         album_items,
         cleanup_duplicates=manifest_present_initially,
+        trusted_existing_paths=trusted_existing_paths,
     )
 
     files_by_google_id, album_dirs = _local_album_google_id_files(
@@ -957,12 +1021,14 @@ def _download_missing_album_items_by_google_id(
         output_path,
         temp_dir_path,
         bootstrap_from_filename=not manifest_present_initially,
+        trusted_existing_paths=trusted_existing_paths,
     )
     _ensure_album_manifest_mappings(
         output_path,
         album_title,
         album_items,
         cleanup_duplicates=manifest_present_initially,
+        trusted_existing_paths=trusted_existing_paths,
     )
     if not manifest_present_initially:
         _cleanup_bootstrap_plain_duplicates(output_path, album_title, album_items)
