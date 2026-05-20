@@ -513,7 +513,7 @@ def _download_individual_album_items(
         files_by_google_id, _ = _local_album_google_id_files(output_path, album_title)
         existing_with_id = files_by_google_id.get(google_id.casefold(), [])
         if existing_with_id:
-            logging.debug(
+            logging.info(
                 f"Skipping Google Photos item {google_id}; already saved as {existing_with_id[0]}"
             )
             skipped_count += 1
@@ -959,6 +959,11 @@ def _download_missing_album_items_by_google_id(
                         or resolved in claimed_paths
                     ):
                         continue
+                    if (
+                        trusted_existing_paths is not None
+                        and resolved not in trusted_existing_paths
+                    ):
+                        continue
                     matched_existing = resolved
                     break
                 if matched_existing is not None:
@@ -973,6 +978,9 @@ def _download_missing_album_items_by_google_id(
                 matched_existing,
                 target_album_dir,
                 output_path,
+            )
+            logging.info(
+                f"Matched existing file before download for Google Photos item {google_id}: {matched_existing}. Added mapping to {GOOGLE_ID_MANIFEST_FILENAME}."
             )
             claimed_paths.add(matched_existing)
 
