@@ -40,3 +40,8 @@ This tool automates the process of downloading photos from Google Photos albums 
 from gp_dl import download_albums
 successful_albums, failed_albums, album_times = download_albums(["ALBUM_URL", "ALBUM_URL2"], output_dir="test")
 ```
+
+
+---
+**Migration Notice:** This repository has been moved to https://git.csd4ni3l.hu/csd4ni3l/gp-dl
+---
