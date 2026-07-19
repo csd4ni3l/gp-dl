@@ -35,7 +35,7 @@ def reset_driver ():
 
 def setup_driver(driver_path=None, profile_dir=None, headless=True):
     chrome_options = Options()
-    if CHROME_BINARY: 
+    if CHROME_BINARY:
         logging.info(f"Use binary <{CHROME_BINARY}>")
         chrome_options.binary_location = CHROME_BINARY
     if profile_dir:
@@ -75,7 +75,7 @@ def find_crdownload_file():
 
 
 def login(
-    user: str , 
+    user: str ,
     password: str,
     driver_path: str | None = None, headless=True):
 
@@ -105,9 +105,9 @@ def login(
 
 def list_albums(
     profile_dir: str | None = None,
-    user: str | None = None, 
+    user: str | None = None,
     password: str | None = None,
-    driver_path: str | None = None, 
+    driver_path: str | None = None,
     headless=True):
 
     driver = get_driver(driver_path=driver_path,headless=headless)
@@ -117,7 +117,7 @@ def list_albums(
         else:
             logging.fatal("Neither profile_dir nor user and password has been defined, cannot fetch your albums.")
             return
-     
+
     driver.get("https://photos.google.com/albums")
     try:
         album_div = WebDriverWait(driver, WEB_DRIVER_WAIT).until(EC.presence_of_element_located((By.CSS_SELECTOR, 'div[aria-label="{albums}"'.format_map(__labels))))
@@ -131,11 +131,11 @@ def list_albums(
     album_links = [link.get_attribute("href") for link in links]
     return album_links
 
-def download_all_albums(    
+def download_all_albums(
     profile_dir: str | None = None,
-    user: str | None = None, 
+    user: str | None = None,
     password: str | None = None,
-    driver_path: str | None = None, 
+    driver_path: str | None = None,
     headless=True):
     album_urls = list_albums(driver_path=driver_path, headless=headless)
     download_albums(album_urls, output_dir, driver_path, profile_dir, headless)
@@ -196,7 +196,7 @@ def download_albums(
 
         logging.debug("Waiting for menu button...")
         try:
-            share_buttons = WebDriverWait(driver, WEB_DRIVER_WAIT).until(EC.element_to_be_clickable((By.XPATH, "//*[@aria-label=\"{share}\"]".format_map(__labels))))    
+            share_buttons = WebDriverWait(driver, WEB_DRIVER_WAIT).until(EC.element_to_be_clickable((By.XPATH, "//*[@aria-label=\"{share}\"]".format_map(__labels))))
 
         except TimeoutException:
             logging.error("Could not find the '{share}' button in time.".format_map(__labels))
@@ -210,7 +210,7 @@ def download_albums(
 
         logging.debug("Waiting for download all button...")
         try:
-            download_all_button = WebDriverWait(driver, WEB_DRIVER_WAIT).until(EC.presence_of_element_located((By.XPATH, '//*[@aria-label="{download}"]'.format_map(__labels))))
+            download_all_button = WebDriverWait(driver, WEB_DRIVER_WAIT).until(EC.presence_of_element_located((By.XPATH, "//li[@role='menuitem' and @aria-label='Download all']".format_map(__labels))))
         except TimeoutException:
             logging.error("Could not find the '{download}' button in time.".format_map(__labels))
             logging.info("Continuing with next album.")
@@ -244,7 +244,7 @@ def download_albums(
 
         successful_albums.append(album_title)
         album_times.append(time.perf_counter() - album_start)
-    
+
         logging.debug("Removing temporary gp_temp directory.")
         os.removedirs("gp_temp")
 
