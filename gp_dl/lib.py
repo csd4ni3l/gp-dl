@@ -59,9 +59,22 @@ def setup_driver(driver_path=None, profile_dir=None, headless=True):
 
     if driver_path:
         service = ChromeService(executable_path=driver_path)
-        return Chrome(options=chrome_options, service=service)
+        driver = Chrome(options=chrome_options, service=service)
     else:
-        return Chrome(options=chrome_options)
+        driver = Chrome(options=chrome_options)
+
+    if headless:
+        # Headless Chrome blocks downloads by default as a security measure,
+        # regardless of the "prefs" dict above. This CDP command explicitly
+        # allows them and sets the target directory.
+        download_dir = os.path.join(os.getcwd(), "gp_temp")
+        os.makedirs(download_dir, exist_ok=True)
+        driver.execute_cdp_cmd("Page.setDownloadBehavior", {
+            "behavior": "allow",
+            "downloadPath": download_dir,
+        })
+
+    return driver
 
 def find_zip_file():
     for file in os.listdir("gp_temp"):
@@ -196,25 +209,21 @@ def download_albums(
 
         logging.debug("Waiting for menu button...")
         try:
-            share_buttons = WebDriverWait(driver, WEB_DRIVER_WAIT).until(EC.element_to_be_clickable((By.XPATH, "//*[@aria-label=\"{share}\"]".format_map(__labels))))
-
+            menu_button = WebDriverWait(driver, WEB_DRIVER_WAIT).until(
+                EC.element_to_be_clickable((By.XPATH, "//button[@aria-label='More options']"))
+            )
         except TimeoutException:
-            logging.error("Could not find the '{share}' button in time.".format_map(__labels))
-            logging.error(f"Check if GOOGLE_LANG (value={GOOGLE_LANG}, default en) is set to your language and available.")
+            logging.error("Could not find the 'More options' button in time.")
             logging.info("Continuing with next album URL.")
             failed_albums.append(album_title)
             continue
-        share_buttons.send_keys(Keys.TAB)
-        menu_button = driver.execute_script("return document.activeElement")
+
         menu_button.click()
 
         logging.debug("Waiting for download all button...")
         try:
-            menu_container = WebDriverWait(driver, WEB_DRIVER_WAIT).until(
-                EC.visibility_of_element_located((By.CSS_SELECTOR, 'div[data-menu-uid]'))
-            )
-            download_all_button = menu_container.find_element(
-                By.XPATH, ".//li[@role='menuitem' and @aria-label='{download}']".format_map(__labels)
+            download_all_button = WebDriverWait(driver, WEB_DRIVER_WAIT).until(
+                EC.element_to_be_clickable((By.XPATH, "//li[@role='menuitem' and @aria-label='Download all']"))
             )
         except TimeoutException:
             logging.error("Could not find the '{download}' button in time.".format_map(__labels))
