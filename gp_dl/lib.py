@@ -137,8 +137,6 @@ def list_albums(
     except TimeoutException:
         logging.error("Could not find the '{albums}' section in time.".format_map(__labels))
         logging.error(f"Check if GOOGLE_LANG (value={GOOGLE_LANG}, default en) is set to your language and available.")
-        logging.info("Continuing with next album URL.")
-        failed_albums.append(album_title)
         raise
     links = album_div.find_elements(By.TAG_NAME, "a")
     album_links = [link.get_attribute("href") for link in links]
@@ -151,7 +149,7 @@ def download_all_albums(
     driver_path: str | None = None,
     headless=True):
     album_urls = list_albums(driver_path=driver_path, headless=headless)
-    download_albums(album_urls, output_dir, driver_path, profile_dir, headless)
+    return download_albums(album_urls, "downloads", driver_path, profile_dir, headless)
 
 def download_albums(
     album_urls: list[str],
@@ -226,7 +224,7 @@ def download_albums(
                 EC.element_to_be_clickable((By.XPATH, "//li[@role='menuitem' and @aria-label='Download all']"))
             )
         except TimeoutException:
-            logging.error("Could not find the '{download}' button in time.".format_map(__labels))
+            logging.error("Could not find the 'Download all' button in time.")
             logging.info("Continuing with next album.")
             failed_albums.append(album_title)
             continue
