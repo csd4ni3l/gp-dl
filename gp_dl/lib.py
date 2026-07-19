@@ -210,7 +210,12 @@ def download_albums(
 
         logging.debug("Waiting for download all button...")
         try:
-            download_all_button = WebDriverWait(driver, WEB_DRIVER_WAIT).until(EC.presence_of_element_located((By.XPATH, "//li[@role='menuitem' and @aria-label='Download all']".format_map(__labels))))
+            menu_container = WebDriverWait(driver, WEB_DRIVER_WAIT).until(
+                EC.visibility_of_element_located((By.CSS_SELECTOR, 'div[data-menu-uid]'))
+            )
+            download_all_button = menu_container.find_element(
+                By.XPATH, ".//li[@role='menuitem' and @aria-label='{download}']".format_map(__labels)
+            )
         except TimeoutException:
             logging.error("Could not find the '{download}' button in time.".format_map(__labels))
             logging.info("Continuing with next album.")

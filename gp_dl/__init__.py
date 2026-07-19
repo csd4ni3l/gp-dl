@@ -1,3 +1,3 @@
 from .lib import download_albums
 
-__version__ = "0.4.1"
+__version__ = "0.4.2"
