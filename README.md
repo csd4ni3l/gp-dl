@@ -40,3 +40,9 @@ This tool automates the process of downloading photos from Google Photos albums 
 from gp_dl import download_albums
 successful_albums, failed_albums, album_times = download_albums(["ALBUM_URL", "ALBUM_URL2"], output_dir="test")
 ```
+
+## Mirrors
+
+[![Forgejo](https://img.shields.io/badge/Forgejo-git.csd4ni3l.hu-1e90ff)](https://git.csd4ni3l.hu/csd4ni3l/gp-dl)
+[![GitHub](https://img.shields.io/badge/GitHub-github.com-181717)](https://github.com/csd4ni3l/gp-dl)
+[![Codeberg](https://img.shields.io/badge/Codeberg-codeberg.org-2185D0)](https://codeberg.org/csd4ni3l/gp-dl)
